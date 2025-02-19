@@ -44,8 +44,8 @@ async function createAuthHeader(url: string, digest: string): Promise<string> {
   await did.authenticate();
 
   const jws = await did.createJWS(authPayload);
-  const [protectedHeader, , signature] = jws.signatures[0].protected.split('.');
-
+  const protectedHeader = jws.signatures[0].protected;
+  const signature = jws.signatures[0].signature;
   return `Bearer ${protectedHeader}.${jws.payload}.${signature}`;
 }
 
