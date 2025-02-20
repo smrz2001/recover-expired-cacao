@@ -1,5 +1,5 @@
 {
-  "name": "expired-cacao-recovery",
+  "name": "recover-expired-cacao",
   "version": "1.0.0",
   "main": "repair_streams.ts",
   "type": "module",
@@ -14,15 +14,12 @@
     "typescript": "^5.1.6"
   },
   "dependencies": {
-    "@ceramicnetwork/cli": "2.38.0",
-    "@ceramicnetwork/common": "2.33.0",
-    "@ceramicnetwork/core": "^2.36.0",
-    "@ceramicnetwork/http-client": "2.30.0",
-    "@ceramicnetwork/stream-tile": "^2.29.0",
-    "@ceramicnetwork/streamid": "^2.16.0",
+    "axios": "^1.7.9",
+    "cartonne": "^3.0.1",
     "csv-parser": "^3.2.0",
     "dotenv": "^16.3.1",
-    "ipfs-http-client": "^60.0.1",
-    "tsm": "^2.3.0"
+    "key-did-provider-ed25519": "^4.0.2",
+    "key-did-resolver": "^4.0.0",
+    "uuid": "^11.1.0"
   }
 }

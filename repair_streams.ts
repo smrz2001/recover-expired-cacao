@@ -1,21 +1,15 @@
 import fs from "fs";
 import csv from "csv-parser";
 import axios from "axios";
-import {create as createIPFSClient } from "ipfs-http-client";
 import { v4 as uuidv4 } from 'uuid';
 import { DID } from 'dids';
 import { Ed25519Provider } from 'key-did-provider-ed25519';
 import { getResolver } from 'key-did-resolver';
 import { fromString } from 'uint8arrays';
-import {type CAR, CARFactory } from 'cartonne'
- import { CommitID, StreamID} from '@ceramicnetwork/streamid';
-import { CeramicClient } from "@ceramicnetwork/http-client";
+import {type CAR } from 'cartonne'
+import { writeFile } from 'fs/promises';
 
-// const CAS_URL = "https://cas-dev-direct.3boxlabs.com"; // Replace with the actual CAS URL
 const CAS_URL = "https://cas.3boxlabs.com";
-const IPFS_NODE_URL = 'http://ceramic-one-0:5101'; 
-
-const cf = new CARFactory();
 
 interface CasAuthPayload {
   url: string;
@@ -30,7 +24,7 @@ async function createAuthHeader(url: string, digest: string): Promise<string> {
     digest,
   };
 
-  const nodePrivateKey = process.env.NODE_PRIVATE_KEY;
+  const nodePrivateKey = process.env["NODE_PRIVATE_KEY"];
   if(!nodePrivateKey) {
     console.error('Node private key not found');
     return '';
@@ -44,38 +38,15 @@ async function createAuthHeader(url: string, digest: string): Promise<string> {
   await did.authenticate();
 
   const jws = await did.createJWS(authPayload);
+  // @ts-ignore
   const protectedHeader = jws.signatures[0].protected;
+  // @ts-ignore
   const signature = jws.signatures[0].signature;
   return `Bearer ${protectedHeader}.${jws.payload}.${signature}`;
 }
 
 interface StreamData {
   streamId: string;
-}
-
-// Function to create IPFS client
-function createIPFSClientInstance() {
-  return createIPFSClient({
-    url: IPFS_NODE_URL,
-  });
-}
-
-
-async function uploadToIPFS(carFile: Uint8Array): Promise<void> {
-  const ipfs = createIPFSClientInstance();
-  const bytes = cf.fromBytes(carFile);
-  console.log(bytes.roots);
-  try {
-    // add sleep for 1 second
-    const result = ipfs.dag.import([carFile], {pinRoots : false});
-    for await (const res of result) {
-      console.log('Successfully stored car to IPFS:',res);
-    }
-    console.log('This is the car stored:', await ipfs.dag.get(bytes.roots[0]));
-  } catch (e) {
-    console.error(e);
-    throw new Error(`Error while storing car to IPFS for stream: ${e}`);
-  }
 }
 
 async function getAnchorStatus(CommitID: string): Promise<any> {
@@ -91,24 +62,40 @@ async function getAnchorStatus(CommitID: string): Promise<any> {
     });
     return response.data;
   } catch (error) {
+    // @ts-ignore
     console.error(`Failure: Error fetching anchor status for stream ${CommitID}:`, error.message);
     return null;
   }
 }
 
 
-function decodeWitnessCAR(witnessCAR) {
-  const base64 = witnessCAR.replace(/-/g, '+').replace(/_/g, '/');
+function decodeWitnessCAR(witnessCAR: CAR) {
+  const base64 = witnessCAR.toString().replace(/-/g, '+').replace(/_/g, '/');
   const padded = base64.padEnd(base64.length + (4 - base64.length % 4) % 4, '=');
   const binaryString = atob(padded);
   return Uint8Array.from(binaryString, char => char.charCodeAt(0));
 }
 
-// Parsing witnessCAR and converting it to a standard CAR
-async function parseWitnessCarFile(witnessCar: CAR){
+async function writeUint8ArrayToFile(uint8Array: Uint8Array, filePath: string) {
   try {
-    const decodedData = await decodeWitnessCAR(witnessCar);
-    await uploadToIPFS(decodedData);
+    await writeFile(filePath, uint8Array);
+    return true; // Success
+  } catch (error) {
+    if (error instanceof Error) {
+      console.error(`Failed to write file: ${error.message}`);
+    } else {
+      console.error('An unknown error occurred while writing the file');
+    }
+    throw error; // Re-throw to allow caller to handle
+  }
+}
+
+// Parsing witnessCAR and converting it to a standard CAR
+async function parseWitnessCarFile(commitID: any, witnessCar: CAR){
+  try {
+    const decodedData = decodeWitnessCAR(witnessCar);
+    // Write the file to disk using its commit ID
+    await writeUint8ArrayToFile(decodedData, `./cars/${commitID}`);
     return true;
   } catch (error) {
     console.error('Error: Parsing error', error);
@@ -118,37 +105,24 @@ async function parseWitnessCarFile(witnessCar: CAR){
 
 async function processStreams(filePath: string): Promise<void> {
   const streams: StreamData[] = [];
-  console.log("TEST 1");
   fs.createReadStream(filePath)
     .pipe(csv())
     .on('data', (data: StreamData) => streams.push(data))
     .on('end', async () => {
       for (const stream of streams) {
-        console.log(`Processing: commit ${stream["Commit ID"]}`);
-        const anchorStatus = await getAnchorStatus(stream["Commit ID"]);
+        // @ts-ignore
+        const commitID = stream["Commit ID"];
+        console.log(`Processing: commit ${commitID}`);
+        const anchorStatus = await getAnchorStatus(commitID);
         if (anchorStatus) {
           if (anchorStatus.status === 'COMPLETED' && anchorStatus.witnessCar) {
-            const carFileStatus = await parseWitnessCarFile(anchorStatus.witnessCar);
-            if (carFileStatus) {
-              const streamID = StreamID.fromString(anchorStatus.streamId);
-              const anchorCommitID = CommitID.make(streamID, anchorStatus.anchorCommit.cid);
-              const ceramic = new CeramicClient("http://localhost:7007");
-              try {
-                const stream = await ceramic.loadStream(anchorCommitID);
-                if(stream) {
-                  console.log(`Success: Stream ${stream.id.toString()} loaded successfully`);
-                }
-              }
-              catch (error) {
-                console.log(`StreamFailure: failed to load teh stream ${anchorCommitID}:`, error.message);
-              }
-            }
+            await parseWitnessCarFile(commitID, anchorStatus.witnessCar);
           }
           else{
-            console.log(`FAIL: Anchor status is not completed for commit: ${stream["Commit ID"]}`);
+            console.log(`FAIL: Anchor status is not completed for commit: ${commitID}`);
           }
         } else {
-          console.log(`FAIL: No anchor status for commit : ${stream["Commit ID"]}`);
+          console.log(`FAIL: No anchor status for commit : ${commitID}`);
         }
       }
     });
