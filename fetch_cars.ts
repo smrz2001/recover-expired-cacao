@@ -6,11 +6,10 @@ import {DID} from 'dids';
 import {Ed25519Provider} from 'key-did-provider-ed25519';
 import {getResolver} from 'key-did-resolver';
 import {fromString} from 'uint8arrays';
-import {CommitID, StreamID} from '@ceramicnetwork/streamid';
-import {CeramicClient} from "@ceramicnetwork/http-client";
+import {type CAR} from 'cartonne'
+import {writeFile} from 'fs/promises';
 
 const CAS_URL = "https://cas.3boxlabs.com";
-const CERAMIC_URL = "http://localhost:7007";
 
 interface CasAuthPayload {
     url: string;
@@ -25,7 +24,7 @@ async function createAuthHeader(url: string, digest: string): Promise<string> {
         digest,
     };
 
-    const nodePrivateKey = process.env.NODE_PRIVATE_KEY;
+    const nodePrivateKey = process.env["NODE_PRIVATE_KEY"];
     if (!nodePrivateKey) {
         console.error('Node private key not found');
         return '';
@@ -63,42 +62,71 @@ async function getAnchorStatus(CommitID: string): Promise<any> {
         });
         return response.data;
     } catch (error) {
+        // @ts-ignore
         console.error(`Failure: Error fetching anchor status for stream ${CommitID}:`, error.message);
         return null;
     }
 }
 
-async function repairStreams(filePath: string): Promise<void> {
+
+function decodeWitnessCAR(witnessCAR: CAR) {
+    const base64 = witnessCAR.toString().replace(/-/g, '+').replace(/_/g, '/');
+    const padded = base64.padEnd(base64.length + (4 - base64.length % 4) % 4, '=');
+    const binaryString = atob(padded);
+    return Uint8Array.from(binaryString, char => char.charCodeAt(0));
+}
+
+async function writeUint8ArrayToFile(uint8Array: Uint8Array, filePath: string) {
+    try {
+        await writeFile(filePath, uint8Array);
+        return true; // Success
+    } catch (error) {
+        if (error instanceof Error) {
+            console.error(`Failed to write file: ${error.message}`);
+        } else {
+            console.error('An unknown error occurred while writing the file');
+        }
+        throw error; // Re-throw to allow caller to handle
+    }
+}
+
+// Parse and store the witness CAR file
+async function storeWitnessCarFile(commitID: any, witnessCar: CAR) {
+    try {
+        const decodedData = decodeWitnessCAR(witnessCar);
+        // Write the file to disk using its commit ID
+        await writeUint8ArrayToFile(decodedData, `./cars/${commitID}`);
+        return true;
+    } catch (error) {
+        console.error('Error: Parsing error', error);
+        return null;
+    }
+}
+
+async function fetchCars(filePath: string): Promise<void> {
     const streams: StreamData[] = [];
     fs.createReadStream(filePath)
         .pipe(csv())
         .on('data', (data: StreamData) => streams.push(data))
         .on('end', async () => {
             for (const stream of streams) {
-                console.log(`Processing: commit ${stream["Commit ID"]}`);
-                const anchorStatus = await getAnchorStatus(stream["Commit ID"]);
+                // @ts-ignore
+                const commitID = stream["Commit ID"];
+                console.log(`Processing: commit ${commitID}`);
+                const anchorStatus = await getAnchorStatus(commitID);
                 if (anchorStatus) {
                     if (anchorStatus.status === 'COMPLETED' && anchorStatus.witnessCar) {
-                        const streamID = StreamID.fromString(anchorStatus.streamId);
-                        const anchorCommitID = CommitID.make(streamID, anchorStatus.anchorCommit.cid);
-                        const ceramic = new CeramicClient(CERAMIC_URL);
-                        try {
-                            const stream = await ceramic.loadStream(anchorCommitID);
-                            if (stream) {
-                                console.log(`Success: Stream ${stream.id.toString()} loaded successfully`);
-                            }
-                        } catch (error) {
-                            // @ts-ignore
-                            console.log(`StreamFailure: failed to load the stream ${anchorCommitID}:`, error.message);
-                        }
+                        await storeWitnessCarFile(commitID, anchorStatus.witnessCar);
+                    } else {
+                        console.log(`FAIL: Anchor status is not completed for commit: ${commitID}`);
                     }
                 } else {
-                    // @ts-ignore
-                    console.log(`FAIL: Anchor status is not completed for commit: ${stream["Commit ID"]}`);
+                    console.log(`FAIL: No anchor status for commit : ${commitID}`);
                 }
             }
         });
 }
 
+
 const csvFilePath = 'streams_all.csv';
-repairStreams(csvFilePath);
+fetchCars(csvFilePath);
