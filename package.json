@@ -1,10 +1,11 @@
 {
   "name": "recover-expired-cacao",
   "version": "1.0.0",
-  "main": "repair_streams.ts",
   "type": "module",
   "sideEffects": false,
   "scripts": {
+    "fetch": "tsx fetch_cars.ts",
+    "store": "tsx store_cars.ts",
     "repair": "tsx repair_streams.ts"
   },
   "license": "(Apache-2.0 OR MIT)",
@@ -14,12 +15,15 @@
     "typescript": "^5.1.6"
   },
   "dependencies": {
+    "@ceramic-sdk/http-client": "^0.2.1",
     "axios": "^1.7.9",
     "cartonne": "^3.0.1",
     "csv-parser": "^3.2.0",
     "dotenv": "^16.3.1",
     "key-did-provider-ed25519": "^4.0.2",
     "key-did-resolver": "^4.0.0",
+    "@ceramicnetwork/http-client": "2.30.0",
+    "@ceramicnetwork/streamid": "^2.16.0",
     "uuid": "^11.1.0"
   }
 }
